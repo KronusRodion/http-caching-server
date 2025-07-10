@@ -14,16 +14,12 @@ import (
 
 type FileService struct {
 	db             *pgxpool.Pool
-	userService    *UserService
-	tokenService   *TokenService
 	storageService *StorageService
 }
 
-func NewFileService(db *pgxpool.Pool, us *UserService, ts *TokenService, storageService *StorageService) *FileService {
+func NewFileService(db *pgxpool.Pool, storageService *StorageService) *FileService {
 	return &FileService{
 		db:             db,
-		userService:    us,
-		tokenService:   ts,
 		storageService: storageService,
 	}
 }
@@ -33,6 +29,8 @@ func (file_s *FileService) UploadFile(
 	meta map[string]interface{},
 	fileData []byte,
 	json_data map[string]interface{},
+    creatorID int,
+    exists bool,
 ) (string, error) {
 
 	name, ok := meta["name"].(string)
@@ -55,15 +53,6 @@ func (file_s *FileService) UploadFile(
 		return "", fmt.Errorf("missing or invalid 'mime'")
 	}
 
-	token, ok := meta["token"].(string)
-	if !ok || token == "" {
-		return "", fmt.Errorf("missing or invalid 'token'")
-	}
-	//Проверяем токен
-	creatorID, err := file_s.tokenService.VerifyAccessToken(token, ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to verify access token: %w", err)
-	}
 
 	if fileData == nil {
 		return "", fmt.Errorf("file data is empty")
@@ -96,11 +85,6 @@ func (file_s *FileService) UploadFile(
 				login, ok := v.(string)
 				if !ok {
 					return "", fmt.Errorf("invalid type in 'grant' array")
-				}
-
-				exists, err := file_s.userService.IsUserExist(creatorID, ctx)
-				if err != nil {
-					return "", fmt.Errorf("failed to check user '%s': %w", login, err)
 				}
 				if !exists {
 					return "", fmt.Errorf("user '%s' does not exist", login)

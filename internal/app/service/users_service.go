@@ -116,8 +116,6 @@ func (us *UserService) VeriefyUser(login, password string, ctx context.Context) 
 func (us *UserService) IsUserExist(user_id int, ctx context.Context)  (bool, error) {
 
     var exist bool
-
-    
     err := us.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1", user_id).Scan(&exist)
     if !exist {
         return false, errors.New("no user with same login")

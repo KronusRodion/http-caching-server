@@ -18,13 +18,15 @@ type FileHandler struct {
 	storageService *service.StorageService
 	tokenService   *service.TokenService
 	db             *pgxpool.Pool
+	userService		*service.UserService
 }
 
-func NewFileHandler(fileService *service.FileService, storageService *service.StorageService, db *pgxpool.Pool) *FileHandler {
+func NewFileHandler(fileService *service.FileService, storageService *service.StorageService, userService *service.UserService, db *pgxpool.Pool) *FileHandler {
 	return &FileHandler{
 		fileService:    fileService,
 		storageService: storageService,
 		db:             db,
+		userService: userService,
 	}
 }
 
@@ -79,7 +81,25 @@ func (file_handler *FileHandler) UploadFile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	path, err := file_handler.fileService.UploadFile(r.Context(), meta, fileData, jsonData)
+	token, ok := meta["token"].(string)
+	if !ok || token == "" {
+		http.Error(w, "Failed to get token from url", http.StatusInternalServerError)
+		return
+	}
+
+	creatorID, err := file_handler.tokenService.VerifyAccessToken(token, r.Context())
+	if err != nil {
+		http.Error(w, "Failed to veriefy token", http.StatusInternalServerError)
+		return
+	}
+
+	exists, err := file_handler.userService.IsUserExist(creatorID, r.Context())
+	if err != nil {
+		http.Error(w, "Failed to veriefy user", http.StatusInternalServerError)
+		return
+	}
+
+	path, err := file_handler.fileService.UploadFile(r.Context(), meta, fileData, jsonData, creatorID, exists)
 	if err != nil {
 		http.Error(w, "Failed to upload file", http.StatusInternalServerError)
 		return

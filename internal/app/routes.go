@@ -15,12 +15,13 @@ func SetupRoutes(jwtSecret, adminToken string) *mux.Router {
 	tokenService := service.NewTokenService(database.DB, jwtSecret)
 	userService := service.NewUserService(database.DB)
 	storageService:=service.NewFileStorage("./documents")
-	fileService := service.NewFileService(database.DB, userService, tokenService, storageService)
+	fileService := service.NewFileService(database.DB, storageService)
 
 	//Хэндлеры
 	authHandler := handlers.NewAuthHandler(tokenService, userService, adminToken)
-	fileHandler:= handlers.NewFileHandler(fileService, storageService, database.DB)
+	fileHandler:= handlers.NewFileHandler(fileService, storageService, userService, database.DB)
 
+	//Роуты
 	mux.HandleFunc("/api/register", authHandler.Registration).Methods("POST")
 	mux.HandleFunc("/api/auth", authHandler.Authorization).Methods("POST")
 	mux.HandleFunc("/api/auth/{token}", authHandler.DeAuthorization).Methods("DELETE")
