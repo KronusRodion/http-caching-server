@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS files (
     creator INT NOT NULL,
     mime_type TEXT,
     is_public BOOLEAN NOT NULL DEFAULT FALSE,
+    file_path TEXT NOT NULL,
     CONSTRAINT fk_creator FOREIGN KEY (creator) REFERENCES users(id) ON DELETE CASCADE
 );
 

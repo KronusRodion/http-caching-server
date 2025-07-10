@@ -2,40 +2,46 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"http-caching-server/internal/app/service"
 	"io"
 	"net/http"
 	"strconv"
 
+	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type FileHandler struct {
-	fileService *service.FileService
-	storageService *service.FileStorage
-	tokenService *service.TokenService
-	db *pgxpool.Pool
+	fileService    *service.FileService
+	storageService *service.StorageService
+	tokenService   *service.TokenService
+	db             *pgxpool.Pool
 }
 
-
-
-func NewFileHandler(fileService *service.FileService, storageService *service.FileStorage, 	db *pgxpool.Pool) *FileHandler {
+func NewFileHandler(fileService *service.FileService, storageService *service.StorageService, db *pgxpool.Pool) *FileHandler {
 	return &FileHandler{
-		fileService: fileService,
+		fileService:    fileService,
 		storageService: storageService,
-		db: db,
+		db:             db,
 	}
 }
 
-
 func (file_handler *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	tx, err := file_handler.db.Begin(r.Context())
-    if err != nil {
+	defer tx.Rollback(r.Context()) //Роллим если не закоммитили транзакцию
+	if err != nil {
 		http.Error(w, "Invalid 'meta' JSON", http.StatusBadRequest)
 		return
-    }
-    defer tx.Rollback(r.Context()) //Роллим если не закоммитили транзакцию
+	}
 
 	//Парсим форму и извлекаем метаданные и json
 	metaJSON := r.FormValue("meta")
@@ -73,7 +79,7 @@ func (file_handler *FileHandler) UploadFile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	path, err:= file_handler.fileService.UploadFile(r.Context(), meta, fileData, jsonData)
+	path, err := file_handler.fileService.UploadFile(r.Context(), meta, fileData, jsonData)
 	if err != nil {
 		http.Error(w, "Failed to upload file", http.StatusInternalServerError)
 		return
@@ -81,72 +87,153 @@ func (file_handler *FileHandler) UploadFile(w http.ResponseWriter, r *http.Reque
 
 	err = file_handler.storageService.SaveFile(r.Context(), fileData, path)
 	if err != nil {
-			http.Error(w, "Failed to save file", http.StatusInternalServerError)
-			return
-		}
-
+		http.Error(w, "Failed to save file", http.StatusInternalServerError)
+		return
+	}
 
 	response := struct {
-            Data struct {
-                JSON map[string]interface{} `json:"json,omitempty"`
-                File string                 `json:"file"`
-            } `json:"data"`
-        }{
-            Data: struct {
-                JSON map[string]interface{} `json:"json,omitempty"`
-                File string                 `json:"file"`
-            }{
-                JSON: jsonData,
-                File: meta["name"].(string),
-            },
-        }
+		Data struct {
+			JSON map[string]interface{} `json:"json,omitempty"`
+			File string                 `json:"file"`
+		} `json:"data"`
+	}{
+		Data: struct {
+			JSON map[string]interface{} `json:"json,omitempty"`
+			File string                 `json:"file"`
+		}{
+			JSON: jsonData,
+			File: meta["name"].(string),
+		},
+	}
 
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusOK)
-        if err := json.NewEncoder(w).Encode(response); err != nil {
-            http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-            return
-        }
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
 
-	tx.Commit(r.Context())
+	err = tx.Commit(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to commit request", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (file_handler *FileHandler) GetFiles(w http.ResponseWriter, r *http.Request) {
 
-    token := r.URL.Query().Get("token")
-    login := r.URL.Query().Get("login")
-    key := r.URL.Query().Get("key")
-    value := r.URL.Query().Get("value")
-    limitStr := r.URL.Query().Get("limit")
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-    // Валидируем токен
-    userID, err := file_handler.tokenService.VerifyAccessToken(token, r.Context())
-    if err != nil {
-        http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
-        return
-    }
+	token := r.URL.Query().Get("token")
+	login := r.URL.Query().Get("login")
+	key := r.URL.Query().Get("key")
+	value := r.URL.Query().Get("value")
+	limitStr := r.URL.Query().Get("limit")
 
-    limit := 0
-    if limitStr != "" {
-        limit64, err := strconv.ParseInt(limitStr, 10, 64)
-        if err == nil && limit64 > 0 {
-            limit = int(limit64)
-        }
-    }
+	// Валидируем токен
+	userID, err := file_handler.tokenService.VerifyAccessToken(token, r.Context())
+	if err != nil {
+		http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
+		return
+	}
 
-    files, err := file_handler.fileService.GetFilesData(r.Context(), userID, login, key, value, limit)
-    if err != nil {
-        http.Error(w, "Failed to load files", http.StatusInternalServerError)
-        return
-    }
+	limit := 0
+	if limitStr != "" {
+		limit64, err := strconv.ParseInt(limitStr, 10, 64)
+		if err == nil && limit64 > 0 {
+			limit = int(limit64)
+		}
+	}
 
-    response := map[string]interface{}{
-        "data": map[string]interface{}{
-            "docs": files,
-        },
-    }
+	files, err := file_handler.fileService.GetFilesData(r.Context(), userID, login, key, value, limit)
+	if err != nil {
+		http.Error(w, "Failed to load files", http.StatusInternalServerError)
+		return
+	}
 
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(http.StatusOK)
-    json.NewEncoder(w).Encode(response)
+	if r.Method == http.MethodHead {
+		w.Header().Set("X-Doc-Count", strconv.Itoa(len(files)))
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	response := map[string]interface{}{
+		"data": map[string]interface{}{
+			"docs": files,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
+func (file_handler *FileHandler) GetFile(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	vars := mux.Vars(r)
+	idStr := vars["id"]
+	file_id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid file ID", http.StatusBadRequest)
+		return
+	}
+
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		http.Error(w, "Missing token", http.StatusBadRequest)
+		return
+	}
+
+	userID, err := file_handler.tokenService.VerifyAccessToken(token, r.Context())
+	if err != nil {
+		http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
+		return
+	}
+
+	fileData, err := file_handler.fileService.GetFileData(r.Context(), file_id, userID)
+	if err != nil {
+		if errors.Is(err, errors.New("file not found")) {
+			http.Error(w, "File not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Failed to load file", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Type", fileData.MIME)
+		w.Header().Set("Content-Length", strconv.Itoa(fileData.Size))
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	w.Header().Set("Content-Type", fileData.MIME)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fileData.Name))
+
+	w.Write(fileData.Content)
+
+	if len(fileData.JSONData) > 0 {
+		response := map[string]interface{}{
+			"response": "ok",
+			"data": map[string]interface{}{
+				"name":    fileData.Name,
+				"mime":    fileData.MIME,
+				"public":  fileData.Public,
+				"created": fileData.CreatedAt.Format("2006-01-02 15:04:05"),
+				"grant":   fileData.Grant,
+				"content": fileData.JSONData,
+			},
+		}
+		json.NewEncoder(w).Encode(response)
+	}
 }

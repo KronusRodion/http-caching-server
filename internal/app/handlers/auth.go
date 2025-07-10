@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"github.com/gorilla/mux"
 )
 
 type AuthHandler struct {
@@ -81,11 +82,14 @@ func (h *AuthHandler) Registration(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) DeAuthorization(w http.ResponseWriter, r *http.Request) {
 
-	token := r.URL.Query().Get("token")    
-    if token == "" {
-        http.Error(w, "Token is required", http.StatusBadRequest)
+	if r.Method != http.MethodDelete {
+        w.Header().Set("Allow", "DELETE")
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
         return
     }
+
+	vars := mux.Vars(r)
+    token := vars["token"]
 
     // Проверяем токен
     _, err := h.tokenService.VerifyAccessToken(token, r.Context())

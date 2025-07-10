@@ -8,15 +8,15 @@ import (
 	"path/filepath"
 )
 
-type FileStorage struct {
+type StorageService struct {
 	basePath string
 }
 
-func NewFileStorage(basePath string) *FileStorage {
-	return &FileStorage{basePath}
+func NewFileStorage(basePath string) *StorageService {
+	return &StorageService{basePath}
 }
 
-func (s *FileStorage) SaveFile(ctx context.Context, fileData []byte, path string) error {
+func (s *StorageService) SaveFile(ctx context.Context, fileData []byte, path string) error {
 	fullPath := filepath.Join(s.basePath, path)
 	err := os.MkdirAll(filepath.Dir(fullPath), 0755)
 	if err != nil {
@@ -30,7 +30,7 @@ func (s *FileStorage) SaveFile(ctx context.Context, fileData []byte, path string
 	return err
 }
 
-func (s *FileStorage) OpenFile(ctx context.Context, path string) (io.ReadCloser, error) {
+func (s *StorageService) OpenFile(ctx context.Context, path string) (io.ReadCloser, error) {
 	fullPath := filepath.Join(s.basePath, path)
 	file, err := os.Open(fullPath)
 	if err != nil {
@@ -39,10 +39,10 @@ func (s *FileStorage) OpenFile(ctx context.Context, path string) (io.ReadCloser,
 	return file, err
 }
 
-func (s *FileStorage) DeleteFile(ctx context.Context, path string) error {
+func (s *StorageService) DeleteFile(ctx context.Context, path string) error {
 	fullPath := filepath.Join(s.basePath, path)
 
-	err:= os.Remove(fullPath)
+	err := os.Remove(fullPath)
 	if err != nil {
 		log.Println("Error of deleting file with fullPath: ", fullPath)
 		return err
