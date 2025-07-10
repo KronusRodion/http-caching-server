@@ -92,23 +92,36 @@ func (us *UserService) IsValidPassword(password string) bool {
 }
 
 
-func (us *UserService) VeriefyUser(login, password string, ctx context.Context)  error {
+func (us *UserService) VeriefyUser(login, password string, ctx context.Context)  (int, error) {
 
     var dbPassword string
-
+    var user_id int
     
-    err := us.db.QueryRow(ctx, "SELECT user_password FROM users WHERE user_login = $1", login).Scan(&dbPassword)
+    err := us.db.QueryRow(ctx, "SELECT user_password, user_id FROM users WHERE user_login = $1", login).Scan(&dbPassword, &user_id)
     if err != nil {
-        return fmt.Errorf("failed to check login uniqueness: %w", err)
+        return -1, fmt.Errorf("failed to check login uniqueness: %w", err)
     }
     hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
     if err != nil {
-        return fmt.Errorf("failed to hashing password: %w", err)
+        return -1, fmt.Errorf("failed to hashing password: %w", err)
     }
 
     if dbPassword != string(hashedPassword){
-        return errors.New("unvalid login or password")
+        return -1, errors.New("unvalid login or password")
     }
 
-    return nil
+    return user_id, nil
+}
+
+func (us *UserService) IsUserExist(user_id int, ctx context.Context)  (bool, error) {
+
+    var exist bool
+
+    
+    err := us.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1", user_id).Scan(&exist)
+    if !exist {
+        return false, errors.New("no user with same login")
+    }
+
+    return true, err
 }

@@ -9,7 +9,7 @@ import (
 type Config struct {
 	DatabaseURL string
 	JWT string
-    AdminToken string `mapstructure:"SECURITY_ADMIN_TOKEN_SDKML;JKAISI"`
+    AdminToken string
 }
 
 func LoadConfig() (*Config, error) {
@@ -21,6 +21,7 @@ func LoadConfig() (*Config, error) {
 
     databaseURL := os.Getenv("DATABASE_URL")
     jwt := os.Getenv("JWT")
+    AdminToken := os.Getenv("ADMIN_TOKEN")
 
     if databaseURL == "" {
         log.Fatal("DATABASE_URL is not set!")
@@ -32,10 +33,15 @@ func LoadConfig() (*Config, error) {
         jwt = "JWTkey"
     }
 
+    if AdminToken == "" {
+        log.Fatal("jwt is not set!")
+        jwt = "SECURITY_ADMIN_TOKEN_SDKML;JKAISI"
+    }
 
 
     return &Config{
         DatabaseURL: databaseURL,
         JWT: jwt,
+        AdminToken: AdminToken,
 	    }, nil
 }

@@ -88,15 +88,20 @@ func (h *AuthHandler) DeAuthorization(w http.ResponseWriter, r *http.Request) {
     }
 
     // Проверяем токен
-    err := h.tokenService.VerifyAccessToken(token)
+    _, err := h.tokenService.VerifyAccessToken(token, r.Context())
     if err != nil {
         log.Printf("Token verification failed: %v", err)
         http.Error(w, "Invalid token", http.StatusUnauthorized)
         return
     }
 
-    h.tokenService.InvalidateToken(token)
-
+	err = h.tokenService.RevokeToken(r.Context(), token)
+	if err != nil {
+        log.Printf("Token verification failed: %v", err)
+        http.Error(w, "Invalid token", http.StatusUnauthorized)
+        return
+    }
+	
     response := map[string]interface{}{
         "response": map[string]bool{
             token: true,
@@ -124,13 +129,13 @@ func (h *AuthHandler) Authorization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.userService.VeriefyUser(req.Login, req.Password, r.Context())
+	user_id, err := h.userService.VeriefyUser(req.Login, req.Password, r.Context())
 	if err != nil {
 			http.Error(w, "User don`t exists", http.StatusBadRequest)
 			return
 		}
 	
-	token, err := h.tokenService.GenerateAccessToken(req.Login, r.RemoteAddr)
+	token, err := h.tokenService.GenerateAccessToken(req.Login, r.RemoteAddr, user_id, r.Context())
 	if err != nil {
 			http.Error(w, "Generating token error", http.StatusInternalServerError)
 			return
