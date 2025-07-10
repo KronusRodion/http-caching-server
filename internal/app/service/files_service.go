@@ -42,7 +42,7 @@ func (file_s *FileService) UploadFile(
 
     public, ok := meta["public"].(bool)
     if !ok {
-        return "", fmt.Errorf("invalid 'public' value")
+        return "", fmt.Errorf(" invalid 'public' value")
     }
 
     mime, ok := meta["mime"].(string)
@@ -50,43 +50,73 @@ func (file_s *FileService) UploadFile(
         return "", fmt.Errorf("missing or invalid 'mime'")
     }
 
-	token, ok := meta["mime"].(string)
-    if !ok || mime == "" {
-        return "", fmt.Errorf("missing or invalid 'mime'")
+    token, ok := meta["token"].(string)
+    if !ok || token == "" {
+        return "", fmt.Errorf("missing or invalid 'token'")
     }
-
-	creatorID, err := file_s.tokenService.VerifyAccessToken(token, ctx)
-	if err != nil {
-			return "", fmt.Errorf("failed to veriefy access token: %w", err)
-		}
-
-    exists, err := file_s.userService.IsUserExist(creatorID, ctx)
+	//Проверяем токен
+    creatorID, err := file_s.tokenService.VerifyAccessToken(token, ctx)
     if err != nil {
-        return "", fmt.Errorf("failed to check user existence: %w", err)
-    }
-    if !exists {
-        return "", fmt.Errorf("user with id %d does not exist", creatorID)
+        return "", fmt.Errorf("failed to verify access token: %w", err)
     }
 
-    if fileData == nil {
+    if fileData == nil{
         return "", fmt.Errorf("file data is empty")
     }
 
-    var grant []string
-    if grantRaw, ok := meta["grant"].([]interface{}); !public && ok && grantRaw != nil {
-        for _, v := range grantRaw {
-            if s, ok := v.(string); ok {
-                grant = append(grant, s)
-            } else {
-                return "", fmt.Errorf("invalid type in 'grant' array")
+    tx, err := file_s.db.Begin(ctx)
+    if err != nil {
+        return "", fmt.Errorf("failed to start transaction: %w", err)
+    }
+    defer tx.Rollback(ctx) //Роллим если не закоммитили транзакцию
+
+    var fileID int
+    err = tx.QueryRow(ctx, `
+        INSERT INTO files (file_name, size, created_at, json_data, creator, mime_type, is_public)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id
+    `, name, len(fileData), time.Now(), json_data, creatorID, mime, public).Scan(&fileID)
+
+    if err != nil {
+        return "", fmt.Errorf("failed to insert file: %w", err)
+    }
+
+    if !public {
+        if grantRaw, ok := meta["grant"].([]interface{}); ok && grantRaw != nil {
+            for _, v := range grantRaw {
+                login, ok := v.(string)
+                if !ok {
+                    return "", fmt.Errorf("invalid type in 'grant' array")
+                }
+
+                exists, err := file_s.userService.IsUserExist(creatorID, ctx)
+                if err != nil {
+                    return "", fmt.Errorf("failed to check user '%s': %w", login, err)
+                }
+                if !exists {
+                    return "", fmt.Errorf("user '%s' does not exist", login)
+                }
+
+                // Вставляем грант
+                _, err = tx.Exec(ctx, `
+                    INSERT INTO grants (file_id, user_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT (file_id, user_id) DO NOTHING
+                `, fileID, creatorID)
+
+                if err != nil {
+                    return "", fmt.Errorf("failed to insert grant for '%s': %w", login, err)
+                }
             }
         }
     }
-	fmt.Println(grant)
+
+    if err := tx.Commit(ctx); err != nil {
+        return "", fmt.Errorf("failed to commit transaction: %w", err)
+    }
+
     now := time.Now().Format("2006-01-02_15-04-05")
     path := fmt.Sprintf("%d_%s_%s", creatorID, name, now)
-
-	file_s.db.Exec(ctx, "INSERT () INTO files VALUES ()", )
 
     return path, nil
 }
