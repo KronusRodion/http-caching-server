@@ -30,6 +30,16 @@ func NewFileHandler(fileService *service.FileService, storageService *service.St
 	}
 }
 
+//Структуры для ответа на выгрузку файла
+type DataResponse struct {
+    JSON map[string]interface{} `json:"json,omitempty"`
+    File string                 `json:"file"`
+}
+
+type Response struct {
+    Data DataResponse `json:"data"`
+}
+
 func (file_handler *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodPost {
@@ -111,20 +121,12 @@ func (file_handler *FileHandler) UploadFile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	response := struct {
-		Data struct {
-			JSON map[string]interface{} `json:"json,omitempty"`
-			File string                 `json:"file"`
-		} `json:"data"`
-	}{
-		Data: struct {
-			JSON map[string]interface{} `json:"json,omitempty"`
-			File string                 `json:"file"`
-		}{
-			JSON: jsonData,
-			File: meta["name"].(string),
-		},
-	}
+	response := Response{
+            Data: DataResponse{
+                JSON: jsonData,
+                File: meta["name"].(string),
+            },
+        }
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

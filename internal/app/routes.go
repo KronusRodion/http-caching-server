@@ -9,7 +9,7 @@ import (
 
 func SetupRoutes(jwtSecret, adminToken string) *mux.Router {
 
-	mux := mux.NewRouter() //Если маршруты по нормальному назвать, можно и http обойтись, а так Gorilla
+	mux := mux.NewRouter() 
 	
 	//Сервисы
 	tokenService := service.NewTokenService(database.DB, jwtSecret)
@@ -28,7 +28,7 @@ func SetupRoutes(jwtSecret, adminToken string) *mux.Router {
 
 	mux.HandleFunc("/api/docs", fileHandler.UploadFile).Methods("POST") //Выгрузка файла на сервер
 	mux.HandleFunc("/api/docs", fileHandler.GetFiles).Methods("GET", "HEAD") //Получение списка файлов
-	mux.HandleFunc("/api/auth", fileHandler.GetFile).Methods("GET", "HEAD") //Загрузка файла с сервера
+	mux.HandleFunc("/api/auth/{id}", fileHandler.GetFile).Methods("GET", "HEAD") //Загрузка файла с сервера
 
 	return mux
 }
