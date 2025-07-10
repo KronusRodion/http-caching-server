@@ -8,15 +8,15 @@ import (
 	"path/filepath"
 )
 
-type fileStorage struct {
+type FileStorage struct {
 	basePath string
 }
 
-func NewFileStorage(basePath string) *fileStorage {
-	return &fileStorage{basePath}
+func NewFileStorage(basePath string) *FileStorage {
+	return &FileStorage{basePath}
 }
 
-func (s *fileStorage) SaveFile(ctx context.Context, fileData []byte, path string) error {
+func (s *FileStorage) SaveFile(ctx context.Context, fileData []byte, path string) error {
 	fullPath := filepath.Join(s.basePath, path)
 	err := os.MkdirAll(filepath.Dir(fullPath), 0755)
 	if err != nil {
@@ -30,7 +30,7 @@ func (s *fileStorage) SaveFile(ctx context.Context, fileData []byte, path string
 	return err
 }
 
-func (s *fileStorage) OpenFile(ctx context.Context, path string) (io.ReadCloser, error) {
+func (s *FileStorage) OpenFile(ctx context.Context, path string) (io.ReadCloser, error) {
 	fullPath := filepath.Join(s.basePath, path)
 	file, err := os.Open(fullPath)
 	if err != nil {
@@ -39,7 +39,7 @@ func (s *fileStorage) OpenFile(ctx context.Context, path string) (io.ReadCloser,
 	return file, err
 }
 
-func (s *fileStorage) DeleteFile(ctx context.Context, path string) error {
+func (s *FileStorage) DeleteFile(ctx context.Context, path string) error {
 	fullPath := filepath.Join(s.basePath, path)
 
 	err:= os.Remove(fullPath)

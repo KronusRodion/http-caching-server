@@ -3,7 +3,10 @@ package service
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -64,6 +67,7 @@ func (file_s *FileService) UploadFile(
         return "", fmt.Errorf("file data is empty")
     }
 
+    //Начинаем транзакцию
     tx, err := file_s.db.Begin(ctx)
     if err != nil {
         return "", fmt.Errorf("failed to start transaction: %w", err)
@@ -121,3 +125,86 @@ func (file_s *FileService) UploadFile(
     return path, nil
 }
 
+
+func (file_s *FileService) GetFilePath(id int) {
+
+}
+
+func (file_s *FileService) GetFilesData(ctx context.Context, userID int, login string, key string, value string, limit int) ([]map[string]interface{}, error) {
+    query := `
+        SELECT 
+            f.id, 
+            f.file_name AS name, 
+            f.mime_type AS mime, 
+            f.is_public AS public, 
+            f.created_at AS created,
+            COALESCE(jsonb_agg(g.user_id) FILTER (WHERE g.user_id IS NOT NULL), '[]') AS grant_list
+        FROM files f
+        LEFT JOIN grants g ON f.id = g.file_id
+    `
+
+    var args []interface{}
+    var conditions []string
+
+    if login == "" {
+        conditions = append(conditions, fmt.Sprintf("f.creator = $%d", len(args)+1))
+        args = append(args, userID)
+    } else {
+        conditions = append(conditions, fmt.Sprintf("(f.creator = $%d OR g.user_id = $%d)", len(args)+1, len(args)+1))
+        args = append(args, userID)
+    }
+
+    if key != "" && value != "" {
+        conditions = append(conditions, fmt.Sprintf("%s = $%d", key, len(args)+1))
+        args = append(args, value)
+    }
+
+    if len(conditions) > 0 {
+        query += " WHERE " + strings.Join(conditions, " AND ")
+    }
+
+    query += `
+        GROUP BY f.id, f.file_name, f.mime_type, f.is_public, f.created_at
+        ORDER BY f.file_name, f.created_at DESC
+    `
+
+    if limit > 0 {
+        query += fmt.Sprintf(" LIMIT $%d", len(args)+1)
+        args = append(args, limit)
+    }
+
+    rows, err := file_s.db.Query(ctx, query, args...)
+    if err != nil {
+        return nil, fmt.Errorf("failed to fetch files: %w", err)
+    }
+    defer rows.Close()
+
+    var files []map[string]interface{}
+
+    for rows.Next() {
+        var (
+            id      int
+            name    string
+            mime    string
+            public  bool
+            created time.Time
+            grants  []int
+        )
+
+        if err := rows.Scan(&id, &name, &mime, &public, &created, &grants); err != nil {
+            return nil, fmt.Errorf("scan error: %w", err)
+        }
+
+        files = append(files, map[string]interface{}{
+            "id":     strconv.Itoa(id),
+            "name":   name,
+            "mime":   mime,
+            "file":   true, // предположим, что это всегда true, как в ТЗ, так как сказали, что file всегда есть
+            "public": public,
+            "created": created.Format("2006-01-02 15:04:05"),
+            "grant":  grants,
+        })
+    }
+
+    return files, nil
+}
