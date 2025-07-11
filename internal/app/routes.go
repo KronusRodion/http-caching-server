@@ -29,6 +29,7 @@ func SetupRoutes(jwtSecret, adminToken string) *mux.Router {
 	mux.HandleFunc("/api/docs", fileHandler.UploadFile).Methods("POST") //Выгрузка файла на сервер
 	mux.HandleFunc("/api/docs", fileHandler.GetFiles).Methods("GET", "HEAD") //Получение списка файлов
 	mux.HandleFunc("/api/auth/{id}", fileHandler.GetFile).Methods("GET", "HEAD") //Загрузка файла с сервера
+	mux.HandleFunc("/api/docs/{id}",fileHandler.DeleteFile).Methods("DELETE") //Удаление файла
 
 	return mux
 }

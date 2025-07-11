@@ -51,7 +51,7 @@ func (file_handler *FileHandler) UploadFile(w http.ResponseWriter, r *http.Reque
 	tx, err := file_handler.db.Begin(r.Context())
 	defer tx.Rollback(r.Context()) //Роллим если не закоммитили транзакцию
 	if err != nil {
-		http.Error(w, "Invalid 'meta' JSON", http.StatusBadRequest)
+		http.Error(w, "error starting transaction", http.StatusInternalServerError)
 		return
 	}
 
@@ -244,6 +244,7 @@ func (file_handler *FileHandler) GetFile(w http.ResponseWriter, r *http.Request)
 
 	w.Write(fileData.Content)
 
+	//Если к файлу json прикреплен, то кидаем его в ответ
 	if len(fileData.JSONData) > 0 {
 		response := map[string]interface{}{
 			"response": "ok",
@@ -257,5 +258,53 @@ func (file_handler *FileHandler) GetFile(w http.ResponseWriter, r *http.Request)
 			},
 		}
 		json.NewEncoder(w).Encode(response)
+	}
+}
+
+func (file_handler *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
+
+	token := r.URL.Query().Get("token")
+	user_id, err := file_handler.tokenService.VerifyAccessToken(token, r.Context())
+	if err != nil {
+		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	id := mux.Vars(r)["id"]
+	if id == "" {
+		http.Error(w, "file id was not found", http.StatusBadRequest)
+		return
+	}
+	file_id, err := strconv.Atoi(id)
+	if err != nil {
+		http.Error(w, "invalid file id", http.StatusBadRequest)
+		return
+	}
+
+	tx, err := file_handler.db.Begin(r.Context())
+	defer tx.Rollback(r.Context()) //Роллим в самом конце
+	if err != nil {
+		http.Error(w, "error starting transaction", http.StatusInternalServerError)
+		return
+	}
+
+
+
+	path, err := file_handler.fileService.DeleteFileFromDB(r.Context(), file_id , user_id)
+	if path == "" || err != nil {
+		http.Error(w, "file was not found", http.StatusInternalServerError)
+		return
+	}
+
+	err = file_handler.storageService.DeleteFile(r.Context(), path)
+	if err != nil {
+		http.Error(w, "error deleting file", http.StatusInternalServerError)
+		return
+	}
+
+	err = tx.Commit(r.Context())
+	if err != nil {
+		http.Error(w, "error deleting file", http.StatusInternalServerError)
+		return
 	}
 }

@@ -50,7 +50,7 @@ func (h *AuthHandler) Registration(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Token != h.adminToken {
-		http.Error(w, "Invalid admin token", http.StatusForbidden)
+		http.Error(w, "Invalid admin token", http.StatusUnauthorized)
 		return
 	}
 

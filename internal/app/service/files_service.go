@@ -306,9 +306,26 @@ func (file_s *FileService) isUserHaveAccess(ctx context.Context, fileID, userID 
 	return exists, nil
 }
 
-func (file_s *FileService) DeleteFileFromDB(ctx context.Context, fileID, userID int) error {
+func (file_s *FileService) DeleteFileFromDB(ctx context.Context, fileID, user_id int) (string, error) {
 
+    ok,err:=file_s.isUserHaveAccess(ctx, fileID, user_id)
+    if !ok {
+        return "", fmt.Errorf("user have not access: %w", err)
+    }
 
+    var filePath string
+    err = file_s.db.QueryRow(ctx, "SELECT file_path FROM files WHERE id = $1", fileID).Scan(&filePath)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            return "", fmt.Errorf("file with ID %d not found", fileID)
+        }
+        return "", fmt.Errorf("failed to fetch file_path: %w", err)
+    }
 
-    return nil
+    _, err = file_s.db.Exec(ctx, "DELETE FROM files WHERE id = $1", fileID)
+    if err != nil {
+        return "", fmt.Errorf("failed to delete file: %w", err)
+    }
+
+    return filePath, nil
 }
