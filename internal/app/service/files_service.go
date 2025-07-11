@@ -138,7 +138,7 @@ func (file_s *FileService) GetFilesData(ctx context.Context, userID int, login s
     }
 
     if key != "" && value != "" {
-        // Проверьте, что `key` безопасно (например, белый список)
+        // ToDO: защитку из ргулярок накинуть, потому что инъекция в key
         conditions = append(conditions, fmt.Sprintf("%s = $%d", key, len(args)+1))
         args = append(args, value)
     }

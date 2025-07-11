@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS grants (
 CREATE TABLE IF NOT EXISTS tokens (
     id SERIAL PRIMARY KEY,
     token TEXT UNIQUE NOT NULL,
-    user_id TEXT NOT NULL,
+    user_id INT NOT NULL,
     expiry TIMESTAMP NOT NULL,
     CONSTRAINT fk_creator FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );

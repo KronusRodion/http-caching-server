@@ -4,10 +4,12 @@ import (
 	"http-caching-server/internal/app/handlers"
 	"http-caching-server/internal/app/service"
 	"http-caching-server/internal/database"
+
 	"github.com/gorilla/mux"
+	"github.com/redis/go-redis/v9"
 )
 
-func SetupRoutes(jwtSecret, adminToken string) *mux.Router {
+func SetupRoutes(jwtSecret, adminToken string, redis *redis.Client) *mux.Router {
 
 	mux := mux.NewRouter() 
 	
@@ -19,7 +21,7 @@ func SetupRoutes(jwtSecret, adminToken string) *mux.Router {
 
 	//Хэндлеры
 	authHandler := handlers.NewAuthHandler(tokenService, userService, adminToken)
-	fileHandler:= handlers.NewFileHandler(fileService, storageService, userService, database.DB)
+	fileHandler:= handlers.NewFileHandler(fileService, storageService, userService, database.DB, redis)
 
 	//Роуты
 	mux.HandleFunc("/api/register", authHandler.Registration).Methods("POST")

@@ -49,7 +49,7 @@ func runMigrations() error {
 	
 	migrationsDir := filepath.Join("internal", "database", "migrations")
     migrationFiles := []string{
-        filepath.Join(migrationsDir, "tokens.sql"),
+        filepath.Join(migrationsDir, "init_migrations.sql"),
     }
 
 	for _, file := range migrationFiles {

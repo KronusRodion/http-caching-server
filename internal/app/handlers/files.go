@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"http-caching-server/internal/app/service"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 type FileHandler struct {
@@ -19,14 +22,16 @@ type FileHandler struct {
 	tokenService   *service.TokenService
 	db             *pgxpool.Pool
 	userService		*service.UserService
+	redisClient    *redis.Client
 }
 
-func NewFileHandler(fileService *service.FileService, storageService *service.StorageService, userService *service.UserService, db *pgxpool.Pool) *FileHandler {
+func NewFileHandler(fileService *service.FileService, storageService *service.StorageService, userService *service.UserService, db *pgxpool.Pool, redisClient *redis.Client) *FileHandler {
 	return &FileHandler{
 		fileService:    fileService,
 		storageService: storageService,
 		db:             db,
 		userService: userService,
+		redisClient:    redisClient,
 	}
 }
 
@@ -134,6 +139,11 @@ func (file_handler *FileHandler) UploadFile(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
+	
+	iter := file_handler.redisClient.Scan(r.Context(), 0, "user:files:*", 0).Iterator()
+    for iter.Next(r.Context()) {
+        file_handler.redisClient.Del(r.Context(), iter.Val())
+    }
 
 	err = tx.Commit(r.Context())
 	if err != nil {
@@ -171,6 +181,37 @@ func (file_handler *FileHandler) GetFiles(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	cacheKey := fmt.Sprintf("user:files:%d:%s:%s:%s:%d", userID, login, key, value, limit)
+	cachedList, err := file_handler.redisClient.Get(r.Context(), cacheKey).Result()
+
+	if err == nil {
+		var docs []map[string]interface{}
+		if err := json.Unmarshal([]byte(cachedList), &docs); err != nil {
+			http.Error(w, "Failed to unmarshal cached list", http.StatusInternalServerError)
+			return
+		}
+
+		if r.Method == http.MethodHead {
+			w.Header().Set("X-Doc-Count", strconv.Itoa(len(docs)))
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		response := map[string]interface{}{
+			"data": map[string]interface{}{
+				"docs": docs,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			http.Error(w, "Failed to encode cached response", http.StatusInternalServerError)
+		}
+		return
+	}
+	
+
 	files, err := file_handler.fileService.GetFilesData(r.Context(), userID, login, key, value, limit)
 	if err != nil {
 		http.Error(w, "Failed to load files", http.StatusInternalServerError)
@@ -191,7 +232,10 @@ func (file_handler *FileHandler) GetFiles(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+
+	jsonData, _ := json.Marshal(response)
 	json.NewEncoder(w).Encode(response)
+	file_handler.redisClient.Set(r.Context(), cacheKey, jsonData, 5*time.Minute)
 }
 
 func (file_handler *FileHandler) GetFile(w http.ResponseWriter, r *http.Request) {
@@ -222,6 +266,89 @@ func (file_handler *FileHandler) GetFile(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+    metaCacheKey := fmt.Sprintf("file:meta:%d", file_id)
+	contentCacheKey := fmt.Sprintf("file:content:%d", file_id)
+	jsonCacheKey := fmt.Sprintf("file:json:%d", file_id)
+
+
+	cachedMeta, err := file_handler.redisClient.Get(r.Context(), metaCacheKey).Result()
+	if err == nil {
+		var meta struct {
+			Name     string    `json:"name"`
+			MIME     string    `json:"mime"`
+			Public   bool      `json:"public"`
+			Created  time.Time `json:"created"`
+			Grant    []int     `json:"grant"`
+			JSONData any       `json:"content,omitempty"`
+		}
+		//метаданные я оставил на случай расширения
+		if err := json.Unmarshal([]byte(cachedMeta), &meta); err != nil {
+			http.Error(w, "Failed to unmarshal cached metadata", http.StatusInternalServerError)
+			return
+		}
+
+		cachedContent, err := file_handler.redisClient.Get(r.Context(), contentCacheKey).Bytes()
+		if err != nil {
+			if err != redis.Nil {
+				http.Error(w, "Failed to get cached content", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		cachedJSON, err := file_handler.redisClient.Get(r.Context(), jsonCacheKey).Result()
+		if err != nil && err != redis.Nil {
+			http.Error(w, "Failed to get cached JSON", http.StatusInternalServerError)
+			return
+		}
+
+		if r.Method == http.MethodHead {
+			w.Header().Set("Content-Type", meta.MIME)
+			w.Header().Set("Content-Length", strconv.Itoa(len(cachedContent)))
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if meta.JSONData != nil {
+			w.Header().Set("Content-Type", "multipart/form-data")
+			writer := multipart.NewWriter(w)
+
+			part, err := writer.CreateFormFile("file", meta.Name)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_, err = part.Write(cachedContent)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			if cachedJSON != "" {
+				metadataPart, err := writer.CreateFormField("metadata")
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				response := map[string]interface{}{
+					"data": cachedJSON,
+				}
+				json.NewEncoder(metadataPart).Encode(response)
+			}
+
+			err = writer.Close()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		} else {
+			w.Header().Set("Content-Type", meta.MIME)
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", meta.Name))
+			w.Write(cachedContent)
+		}
+
+		return
+	}
+
 	fileData, err := file_handler.fileService.GetFileData(r.Context(), file_id, userID)
 	if err != nil {
 		if errors.Is(err, errors.New("file not found")) {
@@ -239,27 +366,73 @@ func (file_handler *FileHandler) GetFile(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	w.Header().Set("Content-Type", fileData.MIME)
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fileData.Name))
-
-	w.Write(fileData.Content)
-
-	//Если к файлу json прикреплен, то кидаем его в ответ
-	if len(fileData.JSONData) > 0 {
-		response := map[string]interface{}{
-			"response": "ok",
-			"data": map[string]interface{}{
-				"name":    fileData.Name,
-				"mime":    fileData.MIME,
-				"public":  fileData.Public,
-				"created": fileData.CreatedAt.Format("2006-01-02 15:04:05"),
-				"grant":   fileData.Grant,
-				"content": fileData.JSONData,
-			},
-		}
-		json.NewEncoder(w).Encode(response)
+	meta := struct {
+        Name    string    `json:"name"`
+        MIME    string    `json:"mime"`
+        Public  bool      `json:"public"`
+        Created time.Time `json:"created"`
+        Grant   []string  `json:"grant"`
+        JSON    any       `json:"content,omitempty"`
+    }{
+        Name:    fileData.Name,
+        MIME:    fileData.MIME,
+        Public:  fileData.Public,
+        Created: fileData.CreatedAt,
+        Grant:   fileData.Grant,
+        JSON:    fileData.JSONData,
+    }
+    metaBytes, err := json.Marshal(meta)
+	if err != nil {
+		http.Error(w, "error while caching data", http.StatusInternalServerError)
+		return
 	}
+
+	if len(fileData.JSONData) > 0 {
+		w.Header().Set("Content-Type", "multipart/form-data")
+
+		writer := multipart.NewWriter(w)
+		part, err := writer.CreateFormFile("file", fileData.Name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, err = part.Write(fileData.Content)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		metadataPart, err := writer.CreateFormField("metadata")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		response := map[string]interface{}{
+			"data": fileData.JSONData,
+		}
+
+		json.NewEncoder(metadataPart).Encode(response)
+
+		err = writer.Close()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		file_handler.redisClient.Set(r.Context(), jsonCacheKey, fileData.JSONData, 15*time.Minute)
+	} else {
+		//Если json нет, то просто с мимом кидаем
+		w.Header().Set("Content-Type", fileData.MIME)
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fileData.Name))
+		w.Write(fileData.Content)
+	}
+	//Кэшируем результаты
+    file_handler.redisClient.Set(r.Context(), metaCacheKey, metaBytes, 15*time.Minute)
+    file_handler.redisClient.Set(r.Context(), contentCacheKey, fileData.Content, 15*time.Minute)
 }
+
+
+
 
 func (file_handler *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 
@@ -312,6 +485,21 @@ func (file_handler *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Reque
         "response": map[string]bool{
             token: true,
         },
+    }
+
+	//Удаляем кэш файла
+	metaKey := fmt.Sprintf("file:meta:%d", file_id)
+    contentKey := fmt.Sprintf("file:content:%d", file_id)
+    jsonKey := fmt.Sprintf("file:json:%d", file_id)
+
+    deletedKeys := []string{metaKey, contentKey, jsonKey}
+    for _, v := range deletedKeys {
+        _ = file_handler.redisClient.Del(r.Context(), v).Err()
+    }
+
+	iter := file_handler.redisClient.Scan(r.Context(), 0, "user:files:*", 0).Iterator()
+    for iter.Next(r.Context()) {
+        file_handler.redisClient.Del(r.Context(), iter.Val())
     }
 
     w.Header().Set("Content-Type", "application/json")

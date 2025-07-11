@@ -1,15 +1,24 @@
 package config
 
 import (
-    "github.com/joho/godotenv"
-    "log"
-    "os"
+	"log"
+	"os"
+	"time"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	DatabaseURL string
-	JWT string
-    AdminToken string
+    DatabaseURL string        `yaml:"database_url"`
+    JWT         string        `yaml:"jwt"`
+    AdminToken  string        `yaml:"admin_token"`
+    Addr        string        `yaml:"redis_address"` 
+    Password    string        `yaml:"redis_password"`
+    User        string        `yaml:"redis_user"`
+    DB          int           `yaml:"redis_db"`
+    MaxRetries  int           `yaml:"max_retries"`
+    DialTimeout time.Duration `yaml:"dial_timeout"` 
+    Timeout     time.Duration `yaml:"timeout"`       
 }
 
 func LoadConfig() (*Config, error) {
@@ -23,25 +32,34 @@ func LoadConfig() (*Config, error) {
     jwt := os.Getenv("JWT")
     AdminToken := os.Getenv("ADMIN_TOKEN")
 
+    cfg := &Config{
+        DatabaseURL: os.Getenv("DATABASE_URL"),
+        JWT:         os.Getenv("JWT"),
+        AdminToken:  os.Getenv("ADMIN_TOKEN"),
+        Addr:        os.Getenv("REDIS_ADDRESS"),
+        Password:    os.Getenv("REDIS_PASSWORD"),
+        User:        os.Getenv("REDIS_USER"),
+        DB:          0, 
+        MaxRetries:  3, 
+        DialTimeout: 5 * time.Second,
+        Timeout:     10 * time.Second,
+    }
+
     if databaseURL == "" {
         log.Fatal("DATABASE_URL is not set!")
-        databaseURL = "postgres://postgres:1234@localhost:5432/postgres?sslmode=disable"
+        cfg.DatabaseURL = "postgres://postgres:1234@localhost:5432/postgres?sslmode=disable"
     }
 
     if jwt == "" {
         log.Fatal("jwt is not set!")
-        jwt = "JWTkey"
+        cfg.JWT = "JWTkey"
     }
 
     if AdminToken == "" {
         log.Fatal("jwt is not set!")
-        jwt = "SECURITY_ADMIN_TOKEN_SDKML;JKAISI"
+        AdminToken = "SECURITY_ADMIN_TOKEN_SDKMLJKAISI"
     }
 
 
-    return &Config{
-        DatabaseURL: databaseURL,
-        JWT: jwt,
-        AdminToken: AdminToken,
-	    }, nil
+    return cfg, nil
 }
