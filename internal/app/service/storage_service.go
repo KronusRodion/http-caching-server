@@ -23,6 +23,10 @@ func (s *StorageService) SaveFile(ctx context.Context, fileData []byte, path str
 		log.Printf("Error creating directory: %v", err)
 		return err
 	}
+	if _, err := os.Stat(fullPath); err == nil {
+		log.Printf("file already exist: %v", err)
+		return err
+	}
 	err = os.WriteFile(fullPath, fileData, 0644)
 	if err != nil {
 		log.Printf("Error writing file: %v", err)

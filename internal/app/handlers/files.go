@@ -21,7 +21,7 @@ type FileHandler struct {
 	storageService *service.StorageService
 	tokenService   *service.TokenService
 	db             *pgxpool.Pool
-	userService		*service.UserService
+	userService    *service.UserService
 	redisClient    *redis.Client
 }
 
@@ -30,19 +30,19 @@ func NewFileHandler(fileService *service.FileService, storageService *service.St
 		fileService:    fileService,
 		storageService: storageService,
 		db:             db,
-		userService: userService,
+		userService:    userService,
 		redisClient:    redisClient,
 	}
 }
 
-//Структуры для ответа на выгрузку файла
+// Структуры для ответа на выгрузку файла
 type DataResponse struct {
-    JSON map[string]interface{} `json:"json,omitempty"`
-    File string                 `json:"file"`
+	JSON map[string]interface{} `json:"json,omitempty"`
+	File string                 `json:"file"`
 }
 
 type Response struct {
-    Data DataResponse `json:"data"`
+	Data DataResponse `json:"data"`
 }
 
 func (file_handler *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
@@ -127,11 +127,11 @@ func (file_handler *FileHandler) UploadFile(w http.ResponseWriter, r *http.Reque
 	}
 
 	response := Response{
-            Data: DataResponse{
-                JSON: jsonData,
-                File: meta["name"].(string),
-            },
-        }
+		Data: DataResponse{
+			JSON: jsonData,
+			File: meta["name"].(string),
+		},
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -139,11 +139,11 @@ func (file_handler *FileHandler) UploadFile(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
-	
+
 	iter := file_handler.redisClient.Scan(r.Context(), 0, "user:files:*", 0).Iterator()
-    for iter.Next(r.Context()) {
-        file_handler.redisClient.Del(r.Context(), iter.Val())
-    }
+	for iter.Next(r.Context()) {
+		file_handler.redisClient.Del(r.Context(), iter.Val())
+	}
 
 	err = tx.Commit(r.Context())
 	if err != nil {
@@ -210,7 +210,6 @@ func (file_handler *FileHandler) GetFiles(w http.ResponseWriter, r *http.Request
 		}
 		return
 	}
-	
 
 	files, err := file_handler.fileService.GetFilesData(r.Context(), userID, login, key, value, limit)
 	if err != nil {
@@ -266,10 +265,9 @@ func (file_handler *FileHandler) GetFile(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-    metaCacheKey := fmt.Sprintf("file:meta:%d", file_id)
+	metaCacheKey := fmt.Sprintf("file:meta:%d", file_id)
 	contentCacheKey := fmt.Sprintf("file:content:%d", file_id)
 	jsonCacheKey := fmt.Sprintf("file:json:%d", file_id)
-
 
 	cachedMeta, err := file_handler.redisClient.Get(r.Context(), metaCacheKey).Result()
 	if err == nil {
@@ -367,21 +365,21 @@ func (file_handler *FileHandler) GetFile(w http.ResponseWriter, r *http.Request)
 	}
 
 	meta := struct {
-        Name    string    `json:"name"`
-        MIME    string    `json:"mime"`
-        Public  bool      `json:"public"`
-        Created time.Time `json:"created"`
-        Grant   []string  `json:"grant"`
-        JSON    any       `json:"content,omitempty"`
-    }{
-        Name:    fileData.Name,
-        MIME:    fileData.MIME,
-        Public:  fileData.Public,
-        Created: fileData.CreatedAt,
-        Grant:   fileData.Grant,
-        JSON:    fileData.JSONData,
-    }
-    metaBytes, err := json.Marshal(meta)
+		Name    string    `json:"name"`
+		MIME    string    `json:"mime"`
+		Public  bool      `json:"public"`
+		Created time.Time `json:"created"`
+		Grant   []string  `json:"grant"`
+		JSON    any       `json:"content,omitempty"`
+	}{
+		Name:    fileData.Name,
+		MIME:    fileData.MIME,
+		Public:  fileData.Public,
+		Created: fileData.CreatedAt,
+		Grant:   fileData.Grant,
+		JSON:    fileData.JSONData,
+	}
+	metaBytes, err := json.Marshal(meta)
 	if err != nil {
 		http.Error(w, "error while caching data", http.StatusInternalServerError)
 		return
@@ -427,14 +425,11 @@ func (file_handler *FileHandler) GetFile(w http.ResponseWriter, r *http.Request)
 		w.Write(fileData.Content)
 	}
 	//Кэшируем результаты
-    file_handler.redisClient.Set(r.Context(), metaCacheKey, metaBytes, 15*time.Minute)
-    file_handler.redisClient.Set(r.Context(), contentCacheKey, fileData.Content, 15*time.Minute)
+	file_handler.redisClient.Set(r.Context(), metaCacheKey, metaBytes, 15*time.Minute)
+	file_handler.redisClient.Set(r.Context(), contentCacheKey, fileData.Content, 15*time.Minute)
 }
 
-
-
-
-func (file_handler *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
+func (file_handler *FileHandler) DeleteFileEverywhere(w http.ResponseWriter, r *http.Request) {
 
 	token := r.URL.Query().Get("token")
 	user_id, err := file_handler.tokenService.VerifyAccessToken(token, r.Context())
@@ -461,9 +456,7 @@ func (file_handler *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-
-
-	path, err := file_handler.fileService.DeleteFileFromDB(r.Context(), file_id , user_id)
+	path, err := file_handler.fileService.DeleteFileFromDB(r.Context(), file_id, user_id)
 	if path == "" || err != nil {
 		http.Error(w, "file was not found", http.StatusInternalServerError)
 		return
@@ -482,26 +475,26 @@ func (file_handler *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Reque
 	}
 
 	response := map[string]interface{}{
-        "response": map[string]bool{
-            token: true,
-        },
-    }
+		"response": map[string]bool{
+			token: true,
+		},
+	}
 
 	//Удаляем кэш файла
 	metaKey := fmt.Sprintf("file:meta:%d", file_id)
-    contentKey := fmt.Sprintf("file:content:%d", file_id)
-    jsonKey := fmt.Sprintf("file:json:%d", file_id)
+	contentKey := fmt.Sprintf("file:content:%d", file_id)
+	jsonKey := fmt.Sprintf("file:json:%d", file_id)
 
-    deletedKeys := []string{metaKey, contentKey, jsonKey}
-    for _, v := range deletedKeys {
-        _ = file_handler.redisClient.Del(r.Context(), v).Err()
-    }
+	deletedKeys := []string{metaKey, contentKey, jsonKey}
+	for _, v := range deletedKeys {
+		_ = file_handler.redisClient.Del(r.Context(), v).Err()
+	}
 
 	iter := file_handler.redisClient.Scan(r.Context(), 0, "user:files:*", 0).Iterator()
-    for iter.Next(r.Context()) {
-        file_handler.redisClient.Del(r.Context(), iter.Val())
-    }
+	for iter.Next(r.Context()) {
+		file_handler.redisClient.Del(r.Context(), iter.Val())
+	}
 
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(response)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }

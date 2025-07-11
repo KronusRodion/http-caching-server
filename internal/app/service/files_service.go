@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -68,7 +69,8 @@ func (file_s *FileService) UploadFile(
 
 	var fileID int
 	now := time.Now().Format("2006-01-02_15-04-05")
-	path := fmt.Sprintf("%d_%s_%s", creatorID, name, now)
+	safeName := filepath.Clean(name)
+	path := fmt.Sprintf("%d_%s_%s", creatorID, safeName, now)
 
 	err = tx.QueryRow(ctx, `
         INSERT INTO files (file_name, size, created_at, json_data, creator, mime_type, is_public, file_path)
@@ -92,14 +94,19 @@ func (file_s *FileService) UploadFile(
 				}
 
 				// Вставляем грант
+				var userID int
+				err := tx.QueryRow(ctx, "SELECT id FROM users WHERE login = $1", login).Scan(&userID)
+				if err != nil {
+					return "", fmt.Errorf("user %s not found: %w", login, err)
+				}
 				_, err = tx.Exec(ctx, `
-                    INSERT INTO grants (file_id, user_id)
-                    VALUES ($1, $2)
-                    ON CONFLICT (file_id, user_id) DO NOTHING
-                `, fileID, creatorID)
+					INSERT INTO grants (file_id, user_id)
+					VALUES ($1, $2)
+					ON CONFLICT (file_id, user_id) DO NOTHING
+				`, fileID, userID)
 
 				if err != nil {
-					return "", fmt.Errorf("failed to insert grant for '%s': %w", login, err)
+					return "", fmt.Errorf("failed to insert grants: %w", err)
 				}
 			}
 		}
@@ -138,7 +145,15 @@ func (file_s *FileService) GetFilesData(ctx context.Context, userID int, login s
     }
 
     if key != "" && value != "" {
-        // ToDO: защитку из ргулярок накинуть, потому что инъекция в key
+
+		allowedColumns := map[string]bool{
+			"file_name":  true,
+			"mime_type":  true,
+			"created_at": true,
+		}
+		if !allowedColumns[key] {
+			return nil, fmt.Errorf("invalid key: %s", key)
+		}
         conditions = append(conditions, fmt.Sprintf("%s = $%d", key, len(args)+1))
         args = append(args, value)
     }
