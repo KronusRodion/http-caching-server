@@ -307,4 +307,13 @@ func (file_handler *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "error deleting file", http.StatusInternalServerError)
 		return
 	}
+
+	response := map[string]interface{}{
+        "response": map[string]bool{
+            token: true,
+        },
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(response)
 }
