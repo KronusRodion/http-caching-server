@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -114,13 +115,23 @@ func (file_handler *FileHandler) UploadFile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	path, err := file_handler.fileService.UploadFile(r.Context(), meta, fileData, jsonData, creatorID, exists)
+	name, ok := meta["name"].(string)
+	if !ok || name == "" {
+		http.Error(w, "Failed to get name from url", http.StatusInternalServerError)
+		return
+	}
+
+	now := time.Now().Format("2006-01-02_15-04-05")
+	safeName := filepath.Clean(name)
+	path := fmt.Sprintf("%d_%s_%s", creatorID, safeName, now)
+	
+	err = file_handler.fileService.UploadFileToDB(r.Context(), meta, fileData, jsonData, creatorID, exists, path, name)
 	if err != nil {
 		http.Error(w, "Failed to upload file", http.StatusInternalServerError)
 		return
 	}
 
-	err = file_handler.storageService.SaveFile(r.Context(), fileData, path)
+	err = file_handler.storageService.SaveFileToStorage(r.Context(), fileData, path)
 	if err != nil {
 		http.Error(w, "Failed to save file", http.StatusInternalServerError)
 		return

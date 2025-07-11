@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -26,51 +25,44 @@ func NewFileService(db *pgxpool.Pool, storageService *StorageService) *FileServi
 	}
 }
 
-func (file_s *FileService) UploadFile(
+func (file_s *FileService) UploadFileToDB(
 	ctx context.Context,
 	meta map[string]interface{},
 	fileData []byte,
 	json_data map[string]interface{},
-    creatorID int,
-    exists bool,
-) (string, error) {
-
-	name, ok := meta["name"].(string)
-	if !ok || name == "" {
-		return "", fmt.Errorf("missing or invalid 'name'")
-	}
+	creatorID int,
+	exists bool,
+	path string,
+	name string,
+) error {
 
 	fileFlag, ok := meta["file"].(bool)
 	if !ok || !fileFlag {
-		return "", fmt.Errorf("'file' flag must be true")
+		return fmt.Errorf("'file' flag must be true")
 	}
 
 	public, ok := meta["public"].(bool)
 	if !ok {
-		return "", fmt.Errorf(" invalid 'public' value")
+		return fmt.Errorf(" invalid 'public' value")
 	}
 
 	mime, ok := meta["mime"].(string)
 	if !ok || mime == "" {
-		return "", fmt.Errorf("missing or invalid 'mime'")
+		return fmt.Errorf("missing or invalid 'mime'")
 	}
 
-
 	if fileData == nil {
-		return "", fmt.Errorf("file data is empty")
+		return fmt.Errorf("file data is empty")
 	}
 
 	//Начинаем транзакцию
 	tx, err := file_s.db.Begin(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to start transaction: %w", err)
+		return fmt.Errorf("failed to start transaction: %w", err)
 	}
 	defer tx.Rollback(ctx) //Роллим если не закоммитили транзакцию
 
 	var fileID int
-	now := time.Now().Format("2006-01-02_15-04-05")
-	safeName := filepath.Clean(name)
-	path := fmt.Sprintf("%d_%s_%s", creatorID, safeName, now)
 
 	err = tx.QueryRow(ctx, `
         INSERT INTO files (file_name, size, created_at, json_data, creator, mime_type, is_public, file_path)
@@ -79,7 +71,7 @@ func (file_s *FileService) UploadFile(
     `, name, len(fileData), time.Now(), json_data, creatorID, mime, public, path).Scan(&fileID)
 
 	if err != nil {
-		return "", fmt.Errorf("failed to insert file: %w", err)
+		return fmt.Errorf("failed to insert file: %w", err)
 	}
 
 	if !public {
@@ -87,17 +79,17 @@ func (file_s *FileService) UploadFile(
 			for _, v := range grantRaw {
 				login, ok := v.(string)
 				if !ok {
-					return "", fmt.Errorf("invalid type in 'grant' array")
+					return fmt.Errorf("invalid type in 'grant' array")
 				}
 				if !exists {
-					return "", fmt.Errorf("user '%s' does not exist", login)
+					return fmt.Errorf("user '%s' does not exist", login)
 				}
 
 				// Вставляем грант
 				var userID int
 				err := tx.QueryRow(ctx, "SELECT id FROM users WHERE login = $1", login).Scan(&userID)
 				if err != nil {
-					return "", fmt.Errorf("user %s not found: %w", login, err)
+					return fmt.Errorf("user %s not found: %w", login, err)
 				}
 				_, err = tx.Exec(ctx, `
 					INSERT INTO grants (file_id, user_id)
@@ -106,22 +98,22 @@ func (file_s *FileService) UploadFile(
 				`, fileID, userID)
 
 				if err != nil {
-					return "", fmt.Errorf("failed to insert grants: %w", err)
+					return fmt.Errorf("failed to insert grants: %w", err)
 				}
 			}
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return "", fmt.Errorf("failed to commit transaction: %w", err)
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	return path, nil
+	return nil
 }
 
 func (file_s *FileService) GetFilesData(ctx context.Context, userID int, login string, key string, value string, limit int) ([]map[string]interface{}, error) {
-    // Составляем поэтапно запрос к БД
-    query := `
+	// Составляем поэтапно запрос к БД
+	query := `
         SELECT 
             f.id, 
             f.file_name AS name, 
@@ -133,18 +125,18 @@ func (file_s *FileService) GetFilesData(ctx context.Context, userID int, login s
         LEFT JOIN grants g ON f.id = g.file_id
     `
 
-    var args []interface{}
-    var conditions []string
+	var args []interface{}
+	var conditions []string
 
-    if login == "" {
-        conditions = append(conditions, fmt.Sprintf("f.creator = $%d", len(args)+1))
-        args = append(args, userID)
-    } else {
-        conditions = append(conditions, fmt.Sprintf("(f.creator = $%d OR g.user_id = $%d)", len(args)+1, len(args)+1))
-        args = append(args, userID)
-    }
+	if login == "" {
+		conditions = append(conditions, fmt.Sprintf("f.creator = $%d", len(args)+1))
+		args = append(args, userID)
+	} else {
+		conditions = append(conditions, fmt.Sprintf("(f.creator = $%d OR g.user_id = $%d)", len(args)+1, len(args)+1))
+		args = append(args, userID)
+	}
 
-    if key != "" && value != "" {
+	if key != "" && value != "" {
 
 		allowedColumns := map[string]bool{
 			"file_name":  true,
@@ -154,74 +146,74 @@ func (file_s *FileService) GetFilesData(ctx context.Context, userID int, login s
 		if !allowedColumns[key] {
 			return nil, fmt.Errorf("invalid key: %s", key)
 		}
-        conditions = append(conditions, fmt.Sprintf("%s = $%d", key, len(args)+1))
-        args = append(args, value)
-    }
+		conditions = append(conditions, fmt.Sprintf("%s = $%d", key, len(args)+1))
+		args = append(args, value)
+	}
 
-    if len(conditions) > 0 {
-        query += " WHERE " + strings.Join(conditions, " AND ")
-    }
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
 
-    query += `
+	query += `
         GROUP BY f.id, f.file_name, f.mime_type, f.is_public, f.created_at
         ORDER BY f.file_name, f.created_at DESC
     `
 
-    if limit > 0 {
-        query += fmt.Sprintf(" LIMIT $%d", len(args)+1)
-        args = append(args, limit)
-    }
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d", len(args)+1)
+		args = append(args, limit)
+	}
 
-    rows, err := file_s.db.Query(ctx, query, args...)
-    if err != nil {
-        return nil, fmt.Errorf("failed to fetch files: %w", err)
-    }
-    defer rows.Close()
+	rows, err := file_s.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch files: %w", err)
+	}
+	defer rows.Close()
 
-    var files []map[string]interface{}
+	var files []map[string]interface{}
 
-    for rows.Next() {
-        var (
-            id          int
-            name        string
-            mime        string
-            public      bool
-            created     time.Time
-            grantsString string // Считываем как строку
-        )
+	for rows.Next() {
+		var (
+			id           int
+			name         string
+			mime         string
+			public       bool
+			created      time.Time
+			grantsString string // Считываем как строку
+		)
 
-        if err := rows.Scan(
-            &id, 
-            &name, 
-            &mime, 
-            &public, 
-            &created, 
-            &grantsString,
-        ); err != nil {
-            return nil, fmt.Errorf("scan error: %w", err)
-        }
+		if err := rows.Scan(
+			&id,
+			&name,
+			&mime,
+			&public,
+			&created,
+			&grantsString,
+		); err != nil {
+			return nil, fmt.Errorf("scan error: %w", err)
+		}
 
-        var grants []int
-        if err := json.Unmarshal([]byte(grantsString), &grants); err != nil {
-            return nil, fmt.Errorf("failed to parse grants: %w", err)
-        }
+		var grants []int
+		if err := json.Unmarshal([]byte(grantsString), &grants); err != nil {
+			return nil, fmt.Errorf("failed to parse grants: %w", err)
+		}
 
-        files = append(files, map[string]interface{}{
-            "id":      strconv.Itoa(id),
-            "name":    name,
-            "mime":    mime,
-            "file":    true, //Ставим в true (Сказали, что всегда file загружается)
-            "public":  public,
-            "created": created.Format("2006-01-02 15:04:05"),
-            "grant":   grants,
-        })
-    }
+		files = append(files, map[string]interface{}{
+			"id":      strconv.Itoa(id),
+			"name":    name,
+			"mime":    mime,
+			"file":    true, //Ставим в true (Сказали, что всегда file загружается)
+			"public":  public,
+			"created": created.Format("2006-01-02 15:04:05"),
+			"grant":   grants,
+		})
+	}
 
-    if err := rows.Err(); err != nil {
-        return nil, fmt.Errorf("rows error: %w", err)
-    }
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
 
-    return files, nil
+	return files, nil
 }
 
 type FileData struct {
@@ -323,24 +315,24 @@ func (file_s *FileService) isUserHaveAccess(ctx context.Context, fileID, userID 
 
 func (file_s *FileService) DeleteFileFromDB(ctx context.Context, fileID, user_id int) (string, error) {
 
-    ok,err:=file_s.isUserHaveAccess(ctx, fileID, user_id)
-    if !ok {
-        return "", fmt.Errorf("user have not access: %w", err)
-    }
+	ok, err := file_s.isUserHaveAccess(ctx, fileID, user_id)
+	if !ok {
+		return "", fmt.Errorf("user have not access: %w", err)
+	}
 
-    var filePath string
-    err = file_s.db.QueryRow(ctx, "SELECT file_path FROM files WHERE id = $1", fileID).Scan(&filePath)
-    if err != nil {
-        if err == sql.ErrNoRows {
-            return "", fmt.Errorf("file with ID %d not found", fileID)
-        }
-        return "", fmt.Errorf("failed to fetch file_path: %w", err)
-    }
+	var filePath string
+	err = file_s.db.QueryRow(ctx, "SELECT file_path FROM files WHERE id = $1", fileID).Scan(&filePath)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", fmt.Errorf("file with ID %d not found", fileID)
+		}
+		return "", fmt.Errorf("failed to fetch file_path: %w", err)
+	}
 
-    _, err = file_s.db.Exec(ctx, "DELETE FROM files WHERE id = $1", fileID)
-    if err != nil {
-        return "", fmt.Errorf("failed to delete file: %w", err)
-    }
+	_, err = file_s.db.Exec(ctx, "DELETE FROM files WHERE id = $1", fileID)
+	if err != nil {
+		return "", fmt.Errorf("failed to delete file: %w", err)
+	}
 
-    return filePath, nil
+	return filePath, nil
 }

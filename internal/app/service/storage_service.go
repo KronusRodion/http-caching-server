@@ -16,7 +16,7 @@ func NewFileStorage(basePath string) *StorageService {
 	return &StorageService{basePath}
 }
 
-func (s *StorageService) SaveFile(ctx context.Context, fileData []byte, path string) error {
+func (s *StorageService) SaveFileToStorage(ctx context.Context, fileData []byte, path string) error {
 	fullPath := filepath.Join(s.basePath, path)
 	err := os.MkdirAll(filepath.Dir(fullPath), 0755)
 	if err != nil {
