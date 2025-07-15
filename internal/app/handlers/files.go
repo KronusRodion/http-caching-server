@@ -84,12 +84,17 @@ func (file_handler *FileHandler) UploadFile(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	file, _, err := r.FormFile("file")
+	file, header , err := r.FormFile("file")
 	if err != nil {
 		http.Error(w, "Error retrieving the file", http.StatusInternalServerError)
 		return
 	}
 	defer file.Close()
+
+	if header.Size > 10<<20 {
+        http.Error(w, "File size exceeds the limit of 10 MB", http.StatusBadRequest)
+        return
+    }
 
 	fileData, err := io.ReadAll(file)
 	if err != nil {
