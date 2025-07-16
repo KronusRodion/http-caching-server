@@ -14,7 +14,7 @@ func SetupRoutes(jwtSecret, adminToken string, redis *redis.Client) *mux.Router 
 	mux := mux.NewRouter()
 
 	//Сервисы
-	tokenService := service.NewTokenService(database.DB, jwtSecret)
+	tokenService := service.NewTokenService(jwtSecret, redis)
 	userService := service.NewUserService(database.DB)
 	storageService := service.NewFileStorage("./documents")
 	fileService := service.NewFileService(database.DB, storageService)

@@ -139,7 +139,7 @@ func (h *AuthHandler) Authorization(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	
-	token, err := h.tokenService.GenerateAccessToken(req.Login, r.RemoteAddr, user_id, r.Context())
+	token, err := h.tokenService.GenerateAccessToken(req.Login, r.RemoteAddr, user_id)
 	if err != nil {
 			http.Error(w, "Generating token error", http.StatusInternalServerError)
 			return
